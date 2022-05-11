@@ -1,0 +1,94 @@
+version: "3"
+
+networks:
+  monitoring:
+
+services:
+  grafana:
+    image: grafana/grafana:8.3.2
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    volumes:
+      - ./datasource.yaml:/etc/grafana/provisioning/datasources/monitoring.yaml
+      - ./data/grafana:/var/lib/grafana
+    networks: [monitoring]
+    user: "1000:1000"
+
+  app:
+    build: app_prom
+    ports: ["8090:8080"]
+    networks: [monitoring]
+
+  app-tracing:
+    image: jaegertracing/example-hotrod:latest
+    ports: 
+      - "8080:8080"
+    command: ["all"]
+    environment:
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+    networks: [monitoring]
+    depends_on: [jaeger]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.43.0
+    restart: unless-stopped
+    command: --docker_only=true --store_container_labels=false
+    ports: ["9081:8080"]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks: [monitoring]
+    privileged: true
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.29.0
+    restart: unless-stopped
+    ports: ["6831:6831/udp", "6832:6832/udp", "14250:14250", "14269:14269", "16686:16686"]
+    volumes:
+      - ./data/jaeger:/badger
+    networks: [monitoring]
+    mem_limit: 512m
+    environment:
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_KEY=/badger/key
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_SPAN_STORE_TTL=168h0m0s
+    user: "1000:1000"
+
+  promtail:
+    image: grafana/promtail:1.4.1
+    restart: unless-stopped
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers
+      - ./promtail.yml:/etc/promtail/docker-config.yml
+      - /var/log:/var/log
+    command: -config.file=/etc/promtail/docker-config.yml
+    networks: [monitoring]
+
+  loki:
+    image: grafana/loki:2.4.1
+    restart: unless-stopped
+    ports: ["3100:3100"]
+    volumes:
+      - ./loki.yaml:/etc/loki/local-config.yaml
+      - ./data/loki:/loki
+      - /var/log:/var/log:ro
+    networks: [monitoring]
+    user: "1000:1000"
+
+  prometheus:
+    image: prom/prometheus:v2.31.2
+    restart: unless-stopped
+    command: --config.file=/etc/prometheus/prometheus.yaml --web.route-prefix=/ --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d --web.enable-lifecycle --web.enable-admin-api
+    ports: ["3001:9090"]
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml
+      - ./data/prometheus:/prometheus
+    networks: [monitoring]
+    user: "1000:1000"
+    mem_limit: 512m
