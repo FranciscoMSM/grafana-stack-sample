@@ -1,0 +1,6 @@
+rm -rf data
+
+mkdir -p data/grafana
+mkdir -p data/prometheus
+mkdir -p data/jaeger
+mkdir -p data/loki
